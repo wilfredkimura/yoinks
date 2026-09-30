@@ -8,6 +8,10 @@ import {readClipboard} from './lib/clipboard.js'
 import {isProbablyUrl} from './lib/platforms.js'
 import {BatchQueue} from './lib/queue.js'
 import {runHeadless} from './lib/headless.js'
+import {loadConfig, saveConfig, resolveLaunchMode} from './lib/config.js'
+import {openBrowser} from './lib/open-browser.js'
+import {startGuiServer} from './gui/server.js'
+import {ensureYtDlp, findFfmpeg} from './lib/ytdlp.js'
 
 // read at runtime from the shipped package.json so npm version bumps
 // can't drift from a hardcoded constant
@@ -25,7 +29,8 @@ const HELP = `
     $ yoinks -b links.txt
     $ yoinks --best https://youtu.be/dQw4w9WgXcQ
     $ yoinks --mp3 -b playlist.txt -o ~/Music
-    $ yoinks                 (prompts for a url)
+    $ yoinks --gui           (starts and opens web gui)
+    $ yoinks                 (first run auto-opens web gui)
 
   Options
     -b, --batch <file>      batch download urls from a text file
@@ -75,17 +80,62 @@ if (args.batchFile) {
 const initialUrl = urls[0]
 const initialThemeMode = args.themeMode ?? 'auto'
 const isTTY = Boolean(process.stdout.isTTY)
+const config = loadConfig()
 
-// Headless scriptable execution check
-const shouldUseHeadless =
-  args.headless ||
-  (!isTTY && urls.length > 0) ||
-  (urls.length > 0 && (args.best || args.mp3))
+// Determine mode: gui vs tui vs headless
+const mode = resolveLaunchMode(
+  {
+    gui: args.gui,
+    tui: args.tui,
+    headless: args.headless || (urls.length > 0 && (args.best || args.mp3)),
+    urls,
+  },
+  config,
+  isTTY,
+)
 
-if (shouldUseHeadless) {
+// Mode 1: Web GUI (Auto-setup on initial launch or when requested)
+if (mode === 'gui') {
+  if (!config.hasRunBefore) {
+    console.log('⚡ Welcome to yoinks! Setting up environment for first run…')
+  }
+
+  try {
+    await ensureYtDlp(status => console.log(`  ${status}`))
+    await findFfmpeg()
+  } catch (err: unknown) {
+    console.warn(`  Notice: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  if (!config.hasRunBefore) {
+    saveConfig({hasRunBefore: true})
+  }
+
+  const guiInstance = await startGuiServer({
+    config,
+  })
+
+  console.log(`\n🚀 yoinks web gui running at: ${guiInstance.url}`)
+  console.log('Opening in your browser… (Press Ctrl+C to stop)\n')
+
+  openBrowser(guiInstance.url)
+
+  await new Promise<void>(resolve => {
+    process.on('SIGINT', () => {
+      console.log('\nStopping yoinks web gui…')
+      void guiInstance.close().then(() => {
+        resolve()
+        process.exit(0)
+      })
+    })
+  })
+}
+
+// Mode 2: Headless batch runner
+if (mode === 'headless') {
   const queue = new BatchQueue({
-    concurrency: args.concurrency,
-    outDir: args.outputDir,
+    concurrency: args.concurrency ?? config.concurrency,
+    outDir: args.outputDir ?? config.outDir,
     defaultPreset: args.preset ?? (args.mp3 ? 'mp3' : 'best'),
   })
   queue.enqueue(urls)
@@ -93,7 +143,7 @@ if (shouldUseHeadless) {
   process.exit(result.failed > 0 ? 1 : 0)
 }
 
-// Interactive TUI execution
+// Mode 3: Interactive Terminal TUI
 let clipboardUrl: string | undefined
 if (!initialUrl && isTTY) {
   const clipped = readClipboard().trim()
@@ -120,9 +170,9 @@ const {waitUntilExit} = render(
   <App
     initialUrl={initialUrl}
     urls={urls.length > 1 ? urls : undefined}
-    outDir={args.outputDir}
+    outDir={args.outputDir ?? config.outDir}
     preset={args.preset}
-    concurrency={args.concurrency}
+    concurrency={args.concurrency ?? config.concurrency}
     clipboardUrl={clipboardUrl}
     initialThemeMode={initialThemeMode}
     onOutcome={result => (outcome = result)}

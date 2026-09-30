@@ -68,9 +68,25 @@ function sendJson(res: http.ServerResponse, statusCode: number, data: any): void
   res.end(json)
 }
 
+function resolveStaticDir(custom?: string): string {
+  if (custom) return custom
+  const candidates = [
+    path.join(__dirname, 'client'),
+    path.join(__dirname, 'gui', 'client'),
+    path.resolve('dist/gui/client'),
+    path.resolve('src/gui/client'),
+  ]
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(candidate, 'index.html'))) {
+      return candidate
+    }
+  }
+  return path.join(__dirname, 'client')
+}
+
 export function startGuiServer(options: GuiServerOptions = {}): Promise<GuiServerInstance> {
   const startPort = options.port ?? 5252
-  const staticDir = options.staticDir ?? path.join(__dirname, 'client')
+  const staticDir = resolveStaticDir(options.staticDir)
   const userConfig = options.config ?? loadConfig()
   const queue =
     options.queue ??
