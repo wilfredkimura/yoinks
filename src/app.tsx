@@ -17,6 +17,8 @@ import {addToHistory, loadHistory} from './lib/history.js'
 import {detectPlatform, isProbablyUrl, type Platform} from './lib/platforms.js'
 import {useMouseClick} from './lib/use-mouse-click.js'
 import {nextThemeMode, ThemeProvider, type ThemeMode, useTheme} from './theme.js'
+import {BatchPanel} from './components/batch-panel.js'
+import {BatchQueue, type DownloadTask, type QueueStats} from './lib/queue.js'
 import {
   buildChoices,
   download,
@@ -83,7 +85,10 @@ function indeterminateMeta(progress: DownloadProgress): string {
   return `${partLabel(progress)}${bytes.padStart(8)}  ${speed.padEnd(10)}`
 }
 
-export type Outcome = {filepath?: string}
+export type Outcome = {
+  filepath?: string
+  batchSummary?: {completed: number; failed: number; total: number}
+}
 
 type Phase =
   | {name: 'input'; warning?: string}
@@ -96,6 +101,7 @@ type Phase =
       processing: boolean
       refreshing?: boolean
     }
+  | {name: 'batch'; queue: BatchQueue; tasks: DownloadTask[]; stats: QueueStats}
   | {name: 'done'; filepath: string}
   | {name: 'error'; message: string}
 
@@ -118,6 +124,10 @@ const HINTS: Record<Phase['name'], Array<[string, string]>> = {
     ['esc', 'cancel'],
     ['^c', 'quit'],
   ],
+  batch: [
+    ['esc', 'cancel'],
+    ['^c', 'quit'],
+  ],
   done: [['^c', 'quit']],
   error: [
     ['↵', 'try again'],
@@ -127,6 +137,10 @@ const HINTS: Record<Phase['name'], Array<[string, string]>> = {
 
 type AppProps = {
   initialUrl?: string
+  urls?: string[]
+  outDir?: string
+  preset?: string
+  concurrency?: number
   clipboardUrl?: string
   initialThemeMode?: ThemeMode
   onOutcome: (outcome: Outcome) => void
@@ -147,11 +161,19 @@ export function App({initialThemeMode = 'auto', ...props}: AppProps) {
 
 function AppContent({
   initialUrl,
+  urls,
+  outDir,
+  preset,
+  concurrency,
   clipboardUrl,
   onOutcome,
   cycleTheme,
 }: {
   initialUrl?: string
+  urls?: string[]
+  outDir?: string
+  preset?: string
+  concurrency?: number
   clipboardUrl?: string
   onOutcome: (outcome: Outcome) => void
   cycleTheme: () => void
@@ -169,7 +191,50 @@ function AppContent({
   const highlightRef = useRef(0) // choice under the cursor, for the ↵ hint click
   const infoJsonRef = useRef<string | undefined>(undefined)
   const abortRef = useRef<AbortController | undefined>(undefined)
-  const [phase, setPhase] = useState<Phase>(initialUrl ? {name: 'probing', status: 'warming up…'} : {name: 'input'})
+  const [phase, setPhase] = useState<Phase>(() => {
+    if (urls && urls.length > 1) {
+      const q = new BatchQueue({
+        outDir: outDir ?? OUT_DIR,
+        defaultPreset: preset ?? 'best',
+        concurrency: concurrency ?? 2,
+      })
+      q.enqueue(urls)
+      return {name: 'batch', queue: q, tasks: q.getTasks(), stats: q.getStats()}
+    }
+    return initialUrl ? {name: 'probing', status: 'warming up…'} : {name: 'input'}
+  })
+
+  useEffect(() => {
+    if (phase.name !== 'batch') return
+    const q = phase.queue
+
+    const update = () => {
+      setPhase(prev =>
+        prev.name === 'batch'
+          ? {...prev, tasks: q.getTasks(), stats: q.getStats()}
+          : prev,
+      )
+    }
+
+    const drain = (summary: {completed: number; failed: number; total: number}) => {
+      onOutcome({batchSummary: summary})
+      setPhase({
+        name: 'done',
+        filepath: `${summary.completed} downloaded out of ${summary.total} (to ${outDir ?? OUT_DIR})`,
+      })
+    }
+
+    q.on('task:update', update)
+    q.on('queue:progress', update)
+    q.on('queue:drain', drain)
+    q.start()
+
+    return () => {
+      q.off('task:update', update)
+      q.off('queue:progress', update)
+      q.off('queue:drain', drain)
+    }
+  }, [phase.name === 'batch'])
 
   const columns = stdout?.columns && stdout.columns > 0 ? stdout.columns : 80
   const boxWidth = Math.max(14, Math.min(64, columns - 6))
@@ -201,8 +266,8 @@ function AppContent({
   }, [])
 
   useEffect(() => {
-    if (initialUrl) void startProbe(initialUrl)
-  }, [initialUrl, startProbe])
+    if (initialUrl && (!urls || urls.length <= 1)) void startProbe(initialUrl)
+  }, [initialUrl, urls, startProbe])
 
   const resetToInput = useCallback(() => {
     setUrl('')
@@ -215,9 +280,12 @@ function AppContent({
 
   const cancelRun = useCallback(() => {
     abortRef.current?.abort()
+    if (phase.name === 'batch') {
+      phase.queue.cancelAll()
+    }
     resetToInput()
     setUrlInput(url) // keep the link around so a cancel isn't destructive
-  }, [resetToInput, url])
+  }, [resetToInput, url, phase])
 
   useInput(
     (input, key) => {
@@ -226,7 +294,7 @@ function AppContent({
         return
       }
       if (key.escape && (phase.name === 'picking' || phase.name === 'error' || phase.name === 'done')) resetToInput()
-      if (key.escape && (phase.name === 'probing' || phase.name === 'downloading')) cancelRun()
+      if (key.escape && (phase.name === 'probing' || phase.name === 'downloading' || phase.name === 'batch')) cancelRun()
       if (key.return && (phase.name === 'error' || phase.name === 'done')) resetToInput()
     },
     {isActive: Boolean(process.stdin.isTTY)},
@@ -293,7 +361,7 @@ function AppContent({
   const hintAction = (key: string): (() => void) | undefined => {
     if (key === '^c') return () => exit()
     if (key === '^t') return cycleTheme
-    if (key === 'esc') return phase.name === 'probing' || phase.name === 'downloading' ? cancelRun : resetToInput
+    if (key === 'esc') return phase.name === 'probing' || phase.name === 'downloading' || phase.name === 'batch' ? cancelRun : resetToInput
     if (key === '↵') {
       if (phase.name === 'input') return () => handleUrlSubmit(urlInput)
       if (phase.name === 'picking') return () => handlePick({value: highlightRef.current})
@@ -326,7 +394,7 @@ function AppContent({
       if (taglineRow > 3 && y - 1 >= taglineRow - 4 && y - 1 <= taglineRow - 2) {
         const span = frameRowSpan(y - 1)
         if (span && x >= span[0] - 1 && x <= span[1] + 1) {
-          if (phase.name === 'probing' || phase.name === 'downloading') cancelRun()
+          if (phase.name === 'probing' || phase.name === 'downloading' || phase.name === 'batch') cancelRun()
           else if (phase.name !== 'input') resetToInput()
           return
         }
@@ -461,6 +529,12 @@ function AppContent({
               </Text>
             </>
           )}
+        </Box>
+      )}
+
+      {phase.name === 'batch' && (
+        <Box flexDirection="column" alignItems="center">
+          <BatchPanel tasks={phase.tasks} stats={phase.stats} width={boxWidth} />
         </Box>
       )}
 
