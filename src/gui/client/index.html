@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>yoinks — bulk video & audio downloader</title>
+  <meta name="description" content="Yoink videos in batch from YouTube, X, Instagram, TikTok, Threads and 1800+ sites with real-time speed, format presets, and smart multi-link input.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <a href="/" class="brand" id="brandLogo">
+        <div class="logo-icon">Y</div>
+        <div class="brand-text">
+          <h1>yoinks</h1>
+          <p>paste. yoink. done.</p>
+        </div>
+      </a>
+      <div class="header-actions">
+        <button id="themeToggleBtn" class="btn-icon" aria-label="Toggle dark/light theme" title="Toggle theme">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main>
+      <!-- Multi-link Smart Input Section -->
+      <section class="input-card" id="inputSection">
+        <div class="input-header">
+          <label for="linksInput">
+            <span>Paste video links</span>
+            <span class="link-counter" id="linkCounter">0 links</span>
+          </label>
+          <div class="input-actions">
+            <input type="file" id="fileInput" accept=".txt" style="display: none;">
+            <button class="import-btn" id="importFileBtn" type="button">📁 Load from .txt file</button>
+          </div>
+        </div>
+
+        <div class="drop-zone" id="dropZone">
+          <textarea
+            id="linksInput"
+            placeholder="Paste one or multiple video links (separated by newlines or spaces)&#10;https://www.youtube.com/watch?v=...&#10;https://x.com/user/status/...&#10;https://tiktok.com/@user/video/..."
+            rows="4"
+          ></textarea>
+          <div class="drop-hint">
+            <span>Tip: Drag & drop a .txt file directly onto this box</span>
+            <span id="outputDirDisplay" title="Click to change destination">Saving to: ~/Downloads</span>
+          </div>
+        </div>
+
+        <!-- Detected links preview chips -->
+        <div class="detected-chips" id="detectedChips"></div>
+
+        <!-- Controls Bar -->
+        <div class="controls-bar">
+          <div class="presets-group" id="presetButtons">
+            <button type="button" class="preset-btn active" data-preset="best" id="presetBest">★ Best Video (MP4)</button>
+            <button type="button" class="preset-btn" data-preset="1080p" id="preset1080">1080p</button>
+            <button type="button" class="preset-btn" data-preset="720p" id="preset720">720p</button>
+            <button type="button" class="preset-btn" data-preset="mp3" id="presetMp3">♪ MP3 Audio</button>
+          </div>
+
+          <div class="action-group">
+            <button type="button" class="yoink-button" id="yoinkAllBtn" disabled>
+              <span>Yoink All</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Active Queue Section -->
+      <section class="queue-section" id="queueSection">
+        <div class="queue-header">
+          <h2>Download Queue</h2>
+          <div class="queue-stats-badge" id="queueStatsBadge">0 tasks</div>
+        </div>
+
+        <div class="queue-cards" id="queueCardsContainer">
+          <div class="empty-queue" id="emptyQueueMsg">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <p>Queue is empty. Paste your links above and click Yoink All to start!</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast-container" id="toastContainer"></div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
